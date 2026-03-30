@@ -1,0 +1,5 @@
+{
+  "name": "Prompt Architect",
+  "description": "A sophisticated prompt generator for software architecture and development, outputting structured JSON for AI-driven code generation.",
+  "requestFramePermissions": []
+}
