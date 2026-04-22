@@ -17,13 +17,15 @@ import {
   Zap, 
   ShieldCheck, 
   FileCode,
+  FileJson,
   Sparkles,
-  Github
+  Github,
+  Terminal
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PromptData, UIElement, Collection } from './types';
 
-const INITIAL_STATE: PromptData = {
+const DEFAULT_VALUES = {
   context: {
     project: '',
     description: '',
@@ -62,16 +64,41 @@ const INITIAL_STATE: PromptData = {
     error_handling: [],
     performance: []
   },
+  contracts: {
+    typespec: null
+  },
   generate: {
     artifacts: [],
     explanation: true
+  },
+  instructions_for_ai: {
+    response_format: 'ONLY JSON, strictly following this schema',
+    do_not: [],
+    validation_hint: ''
   }
 };
+
+const INITIAL_STATE: PromptData = {
+  ...DEFAULT_VALUES,
+  contracts: { typespec: null }
+};
+
+const INSTRUCTION_TYPES = [
+  { id: 'response_format', label: 'Response Format' },
+  { id: 'do_not', label: 'Do Not' },
+  { id: 'validation_hint', label: 'Validation Hint' },
+  { id: 'ensure', label: 'Ensure' },
+  { id: 'prevent', label: 'Prevent' },
+  { id: 'style_guide', label: 'Style Guide' },
+  { id: 'constraints', label: 'Constraints' },
+  { id: 'context_note', label: 'Context Note' }
+];
 
 export default function App() {
   const [data, setData] = useState<PromptData>(INITIAL_STATE);
   const [copied, setCopied] = useState(false);
   const [activeSection, setActiveSection] = useState<string>('context');
+  const [selectedInstructionType, setSelectedInstructionType] = useState('do_not');
 
   const jsonOutput = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
@@ -82,31 +109,39 @@ export default function App() {
   };
 
   const updateContext = (field: string, value: any) => {
-    setData(prev => ({
-      ...prev,
-      context: { ...prev.context, [field]: value }
-    }));
+    setData(prev => {
+      if (!prev.context) return prev;
+      return {
+        ...prev,
+        context: { ...prev.context, [field]: value }
+      }
+    });
   };
 
   const updateAssume = (field: string, value: any) => {
-    setData(prev => ({
-      ...prev,
-      context: {
-        ...prev.context,
-        assume: { ...prev.context.assume, [field]: value }
+    setData(prev => {
+      if (!prev.context) return prev;
+      return {
+        ...prev,
+        context: {
+          ...prev.context,
+          assume: { ...prev.context.assume, [field]: value }
+        }
       }
-    }));
+    });
   };
 
   const addToList = (path: string[], value: string) => {
     if (!value) return;
     setData(prev => {
       const [level1, level2] = path;
+      const section = (prev as any)[level1];
+      if (!section) return prev;
       return {
         ...prev,
         [level1]: {
-          ...(prev as any)[level1],
-          [level2]: [...(prev as any)[level1][level2], value]
+          ...section,
+          [level2]: [...section[level2], value]
         }
       };
     });
@@ -115,11 +150,13 @@ export default function App() {
   const removeFromList = (path: string[], index: number) => {
     setData(prev => {
       const [level1, level2] = path;
+      const section = (prev as any)[level1];
+      if (!section) return prev;
       return {
         ...prev,
         [level1]: {
-          ...(prev as any)[level1],
-          [level2]: (prev as any)[level1][level2].filter((_: any, i: number) => i !== index)
+          ...section,
+          [level2]: section[level2].filter((_: any, i: number) => i !== index)
         }
       };
     });
@@ -127,23 +164,97 @@ export default function App() {
 
   const addUIElement = () => {
     const newElement: UIElement = { type: 'button', title: 'New Button' };
-    setData(prev => ({
-      ...prev,
-      ui_spec: {
-        ...prev.ui_spec,
-        elements: [...prev.ui_spec.elements, newElement]
+    setData(prev => {
+      if (!prev.ui_spec) return prev;
+      return {
+        ...prev,
+        ui_spec: {
+          ...prev.ui_spec,
+          elements: [...prev.ui_spec.elements, newElement]
+        }
       }
-    }));
+    });
   };
 
   const updateUIElement = (index: number, field: keyof UIElement, value: string) => {
     setData(prev => {
+      if (!prev.ui_spec) return prev;
       const newElements = [...prev.ui_spec.elements];
       newElements[index] = { ...newElements[index], [field]: value };
       return {
         ...prev,
         ui_spec: { ...prev.ui_spec, elements: newElements }
       }
+    });
+  };
+
+  const toggleSection = (section: keyof PromptData) => {
+    setData(prev => ({
+      ...prev,
+      [section]: prev[section] ? null : (DEFAULT_VALUES as any)[section]
+    }));
+  };
+
+  const addInstruction = () => {
+    setData(prev => {
+      if (!prev.instructions_for_ai) return prev;
+      const key = selectedInstructionType;
+      const current = prev.instructions_for_ai[key];
+      const next = { ...prev.instructions_for_ai };
+      
+      const listTypes = ['do_not', 'ensure', 'prevent', 'constraints'];
+      
+      if (listTypes.includes(key)) {
+        next[key] = Array.isArray(current) ? [...current, ''] : (current ? [current, ''] : ['']);
+      } else {
+        if (current !== undefined && current !== '') {
+          next[key] = Array.isArray(current) ? [...current, ''] : [current, ''];
+        } else {
+          next[key] = '';
+        }
+      }
+      
+      return { ...prev, instructions_for_ai: next };
+    });
+  };
+
+  const removeInstruction = (key: string, index?: number) => {
+    setData(prev => {
+      if (!prev.instructions_for_ai) return prev;
+      const next = { ...prev.instructions_for_ai };
+      
+      if (index !== undefined && Array.isArray(next[key])) {
+        const newList = [...(next[key] as string[])];
+        newList.splice(index, 1);
+        if (newList.length === 0) {
+          delete next[key];
+        } else if (newList.length === 1) {
+          next[key] = newList[0];
+        } else {
+          next[key] = newList;
+        }
+      } else {
+        delete next[key];
+      }
+      
+      return { ...prev, instructions_for_ai: next };
+    });
+  };
+
+  const updateInstructionValue = (key: string, value: string, index?: number) => {
+    setData(prev => {
+      if (!prev.instructions_for_ai) return prev;
+      const next = { ...prev.instructions_for_ai };
+      
+      if (index !== undefined && Array.isArray(next[key])) {
+        const newList = [...(next[key] as string[])];
+        newList[index] = value;
+        next[key] = newList;
+      } else {
+        next[key] = value;
+      }
+      
+      return { ...prev, instructions_for_ai: next };
     });
   };
 
@@ -166,7 +277,9 @@ export default function App() {
 
   const ListInput = ({ path, placeholder, label }: { path: string[], placeholder: string, label: string }) => {
     const [val, setVal] = useState('');
-    const items = path.reduce((acc, key) => acc[key], data as any) as string[];
+    const items = path.reduce((acc, key) => acc ? acc[key] : null, data as any) as string[] | null;
+
+    if (!items) return null;
 
     return (
       <div className="space-y-3">
@@ -257,66 +370,87 @@ export default function App() {
                   className="overflow-hidden"
                 >
                   <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Project Name</label>
-                      <input 
-                        type="text" 
-                        value={data.context.project}
-                        onChange={(e) => updateContext('project', e.target.value)}
-                        placeholder="e.g. Real-time Dashboard"
-                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Project Description</label>
-                      <textarea 
-                        value={data.context.description}
-                        onChange={(e) => updateContext('description', e.target.value)}
-                        placeholder="Describe the project goals and core functionality..."
-                        rows={3}
-                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Agent Role</label>
-                      <textarea 
-                        value={data.context.agent_role}
-                        onChange={(e) => updateContext('agent_role', e.target.value)}
-                        placeholder="Define the AI's persona (e.g. Senior Architect)..."
-                        rows={2}
-                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Framework</label>
-                        <select 
-                          value={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? data.context.assume.framework : 'Other'}
-                          onChange={(e) => updateAssume('framework', e.target.value)}
-                          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-                        >
-                          <option>React</option>
-                          <option>Next.js</option>
-                          <option>Vue</option>
-                          <option>Angular</option>
-                          <option>Svelte</option>
-                          <option>Other</option>
-                        </select>
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Include project context in the generated prompt.</p>
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 opacity-0">Custom Framework</label>
+                      <div className="flex items-center gap-3">
                         <input 
-                          type="text"
-                          disabled={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework)}
-                          value={!['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? (data.context.assume.framework === 'Other' ? '' : data.context.assume.framework) : ''}
-                          onChange={(e) => updateAssume('framework', e.target.value)}
-                          placeholder={!['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? "Enter custom framework..." : "Select 'Other' to enable"}
-                          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          type="checkbox" 
+                          id="toggle-context"
+                          checked={data.context !== null}
+                          onChange={() => toggleSection('context')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
                         />
+                        <label htmlFor="toggle-context" className="text-sm font-medium text-zinc-700">Enabled</label>
                       </div>
                     </div>
-                    <ListInput path={['requirements', 'use']} label="Technologies to Use" placeholder="e.g. Framer Motion" />
-                    <ListInput path={['requirements', 'ensure']} label="Core Requirements" placeholder="e.g. Responsive Design" />
+
+                    {data.context && (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Project Name</label>
+                          <input 
+                            type="text" 
+                            value={data.context.project}
+                            onChange={(e) => updateContext('project', e.target.value)}
+                            placeholder="e.g. Real-time Dashboard"
+                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Project Description</label>
+                          <textarea 
+                            value={data.context.description}
+                            onChange={(e) => updateContext('description', e.target.value)}
+                            placeholder="Describe the project goals and core functionality..."
+                            rows={3}
+                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Agent Role</label>
+                          <textarea 
+                            value={data.context.agent_role}
+                            onChange={(e) => updateContext('agent_role', e.target.value)}
+                            placeholder="Define the AI's persona (e.g. Senior Architect)..."
+                            rows={2}
+                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Framework</label>
+                            <select 
+                              value={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? data.context.assume.framework : 'Other'}
+                              onChange={(e) => updateAssume('framework', e.target.value)}
+                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                            >
+                              <option>React</option>
+                              <option>Next.js</option>
+                              <option>Vue</option>
+                              <option>Angular</option>
+                              <option>Svelte</option>
+                              <option>Other</option>
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 opacity-0">Custom Framework</label>
+                            <input 
+                              type="text"
+                              disabled={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework)}
+                              value={!['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? (data.context.assume.framework === 'Other' ? '' : data.context.assume.framework) : ''}
+                              onChange={(e) => updateAssume('framework', e.target.value)}
+                              placeholder={!['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? "Enter custom framework..." : "Select 'Other' to enable"}
+                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            />
+                          </div>
+                        </div>
+                        <ListInput path={['requirements', 'use']} label="Technologies to Use" placeholder="e.g. Framer Motion" />
+                        <ListInput path={['requirements', 'ensure']} label="Core Requirements" placeholder="e.g. Responsive Design" />
+                      </>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -335,81 +469,102 @@ export default function App() {
                   className="overflow-hidden"
                 >
                   <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Theme</label>
-                        <select 
-                          value={data.ui_spec.theme}
-                          onChange={(e) => setData(prev => ({ ...prev, ui_spec: { ...prev.ui_spec, theme: e.target.value }}))}
-                          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-                        >
-                          <option>Light</option>
-                          <option>Dark</option>
-                          <option>System</option>
-                          <option>Brutalist</option>
-                        </select>
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Include UI specifications and styling rules.</p>
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Layout</label>
-                        <select 
-                          value={data.ui_spec.layout}
-                          onChange={(e) => setData(prev => ({ ...prev, ui_spec: { ...prev.ui_spec, layout: e.target.value }}))}
-                          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-                        >
-                          <option>Vertical</option>
-                          <option>Horizontal</option>
-                          <option>Grid</option>
-                          <option>Bento</option>
-                        </select>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-ui"
+                          checked={data.ui_spec !== null}
+                          onChange={() => toggleSection('ui_spec')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-ui" className="text-sm font-medium text-zinc-700">Enabled</label>
                       </div>
                     </div>
-                    
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">UI Elements</label>
-                        <button 
-                          onClick={addUIElement}
-                          className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
-                        >
-                          <Plus size={14} /> Add Element
-                        </button>
-                      </div>
-                      <div className="space-y-3">
-                        {data.ui_spec.elements.map((el, i) => (
-                          <div key={i} className="bg-zinc-50 border border-zinc-200 rounded-lg p-4 space-y-3 relative group">
-                            <button 
-                              onClick={() => setData(prev => ({ ...prev, ui_spec: { ...prev.ui_spec, elements: prev.ui_spec.elements.filter((_, idx) => idx !== i) }}))}
-                              className="absolute top-4 right-4 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+
+                    {data.ui_spec && (
+                      <>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Theme</label>
+                            <select 
+                              value={data.ui_spec.theme}
+                              onChange={(e) => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, theme: e.target.value } : null }))}
+                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
                             >
-                              <Trash2 size={16} />
-                            </button>
-                            <div className="grid grid-cols-2 gap-3">
-                              <input 
-                                type="text" 
-                                value={el.type}
-                                onChange={(e) => updateUIElement(i, 'type', e.target.value)}
-                                placeholder="Type (e.g. dialog)"
-                                className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
-                              />
-                              <input 
-                                type="text" 
-                                value={el.title || ''}
-                                onChange={(e) => updateUIElement(i, 'title', e.target.value)}
-                                placeholder="Title/Label"
-                                className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
-                              />
-                            </div>
-                            <input 
-                              type="text" 
-                              value={el.bind_to || ''}
-                              onChange={(e) => updateUIElement(i, 'bind_to', e.target.value)}
-                              placeholder="Data Binding (e.g. data.items)"
-                              className="w-full bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
-                            />
+                              <option>Light</option>
+                              <option>Dark</option>
+                              <option>System</option>
+                              <option>Brutalist</option>
+                            </select>
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                          <div className="space-y-2">
+                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Layout</label>
+                            <select 
+                              value={data.ui_spec.layout}
+                              onChange={(e) => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, layout: e.target.value } : null }))}
+                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                            >
+                              <option>Vertical</option>
+                              <option>Horizontal</option>
+                              <option>Grid</option>
+                              <option>Bento</option>
+                            </select>
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">UI Elements</label>
+                            <button 
+                              onClick={addUIElement}
+                              className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
+                            >
+                              <Plus size={14} /> Add Element
+                            </button>
+                          </div>
+                          <div className="space-y-3">
+                            {data.ui_spec.elements.map((el, i) => (
+                              <div key={i} className="bg-zinc-50 border border-zinc-200 rounded-lg p-4 space-y-3 relative group">
+                                <button 
+                                  onClick={() => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, elements: prev.ui_spec.elements.filter((_, idx) => idx !== i) } : null }))}
+                                  className="absolute top-4 right-4 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <input 
+                                    type="text" 
+                                    value={el.type}
+                                    onChange={(e) => updateUIElement(i, 'type', e.target.value)}
+                                    placeholder="Type (e.g. dialog)"
+                                    className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                  />
+                                  <input 
+                                    type="text" 
+                                    value={el.title || ''}
+                                    onChange={(e) => updateUIElement(i, 'title', e.target.value)}
+                                    placeholder="Title/Label"
+                                    className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                  />
+                                </div>
+                                <input 
+                                  type="text" 
+                                  value={el.bind_to || ''}
+                                  onChange={(e) => updateUIElement(i, 'bind_to', e.target.value)}
+                                  placeholder="Data Binding (e.g. data.items)"
+                                  className="w-full bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -428,61 +583,84 @@ export default function App() {
                   className="overflow-hidden"
                 >
                   <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Storage Type</label>
-                      <input 
-                        type="text" 
-                        value={data.data_spec.storage.type}
-                        onChange={(e) => setData(prev => ({ ...prev, data_spec: { ...prev.data_spec, storage: { ...prev.data_spec.storage, type: e.target.value }}}))}
-                        placeholder="e.g. Convex"
-                        className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-                      />
-                    </div>
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Collections / Tables</label>
-                        <button 
-                          onClick={() => setData(prev => ({ ...prev, data_spec: { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: [...prev.data_spec.storage.collections, { name: '', schema: '' }] }}}))}
-                          className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
-                        >
-                          <Plus size={14} /> Add Collection
-                        </button>
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Define storage type and data collections.</p>
                       </div>
-                      <div className="space-y-3">
-                        {data.data_spec.storage.collections.map((col, i) => (
-                          <div key={i} className="bg-zinc-50 border border-zinc-200 rounded-lg p-4 grid grid-cols-2 gap-3 relative group">
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-data"
+                          checked={data.data_spec !== null}
+                          onChange={() => toggleSection('data_spec')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-data" className="text-sm font-medium text-zinc-700">Enabled</label>
+                      </div>
+                    </div>
+
+                    {data.data_spec && (
+                      <>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Storage Type</label>
+                          <input 
+                            type="text" 
+                            value={data.data_spec.storage.type}
+                            onChange={(e) => setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, type: e.target.value }} : null }))}
+                            placeholder="e.g. Convex"
+                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                          />
+                        </div>
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Collections / Tables</label>
                             <button 
-                              onClick={() => setData(prev => ({ ...prev, data_spec: { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: prev.data_spec.storage.collections.filter((_, idx) => idx !== i) }}}))}
-                              className="absolute -top-2 -right-2 bg-white border border-zinc-200 rounded-full p-1 text-zinc-400 hover:text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: [...prev.data_spec.storage.collections, { name: '', schema: '' }] }} : null }))}
+                              className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
                             >
-                              <Trash2 size={12} />
+                              <Plus size={14} /> Add Collection
                             </button>
-                            <input 
-                              type="text" 
-                              value={col.name}
-                              onChange={(e) => {
-                                const newCols = [...data.data_spec.storage.collections];
-                                newCols[i].name = e.target.value;
-                                setData(prev => ({ ...prev, data_spec: { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }}}));
-                              }}
-                              placeholder="Name"
-                              className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
-                            />
-                            <input 
-                              type="text" 
-                              value={col.schema}
-                              onChange={(e) => {
-                                const newCols = [...data.data_spec.storage.collections];
-                                newCols[i].schema = e.target.value;
-                                setData(prev => ({ ...prev, data_spec: { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }}}));
-                              }}
-                              placeholder="Schema (e.g. JSON)"
-                              className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
-                            />
                           </div>
-                        ))}
-                      </div>
-                    </div>
+                          <div className="space-y-3">
+                            {data.data_spec.storage.collections.map((col, i) => (
+                              <div key={i} className="bg-zinc-50 border border-zinc-200 rounded-lg p-4 grid grid-cols-2 gap-3 relative group">
+                                <button 
+                                  onClick={() => setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: prev.data_spec.storage.collections.filter((_, idx) => idx !== i) }} : null }))}
+                                  className="absolute -top-2 -right-2 bg-white border border-zinc-200 rounded-full p-1 text-zinc-400 hover:text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                                <input 
+                                  type="text" 
+                                  value={col.name}
+                                  onChange={(e) => {
+                                    if (!data.data_spec) return;
+                                    const newCols = [...data.data_spec.storage.collections];
+                                    newCols[i].name = e.target.value;
+                                    setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }} : null }));
+                                  }}
+                                  placeholder="Name"
+                                  className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                />
+                                <input 
+                                  type="text" 
+                                  value={col.schema}
+                                  onChange={(e) => {
+                                    if (!data.data_spec) return;
+                                    const newCols = [...data.data_spec.storage.collections];
+                                    newCols[i].schema = e.target.value;
+                                    setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }} : null }));
+                                  }}
+                                  placeholder="Schema (e.g. JSON)"
+                                  className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -501,9 +679,30 @@ export default function App() {
                   className="overflow-hidden"
                 >
                   <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <ListInput path={['behavior', 'state_changes']} label="State Changes" placeholder="e.g. onClick submit -> add item" />
-                    <ListInput path={['behavior', 'validation']} label="Validation Rules" placeholder="e.g. email must be valid" />
-                    <ListInput path={['behavior', 'edge_cases']} label="Edge Cases" placeholder="e.g. empty list state" />
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Define application behavior and logic rules.</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-behavior"
+                          checked={data.behavior !== null}
+                          onChange={() => toggleSection('behavior')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-behavior" className="text-sm font-medium text-zinc-700">Enabled</label>
+                      </div>
+                    </div>
+
+                    {data.behavior && (
+                      <>
+                        <ListInput path={['behavior', 'state_changes']} label="State Changes" placeholder="e.g. onClick submit -> add item" />
+                        <ListInput path={['behavior', 'validation']} label="Validation Rules" placeholder="e.g. email must be valid" />
+                        <ListInput path={['behavior', 'edge_cases']} label="Edge Cases" placeholder="e.g. empty list state" />
+                      </>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -522,8 +721,108 @@ export default function App() {
                   className="overflow-hidden"
                 >
                   <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <ListInput path={['testing', 'test_cases']} label="Test Cases" placeholder="e.g. user adds item with empty name" />
-                    <ListInput path={['testing', 'error_handling']} label="Error Handling" placeholder="e.g. API timeout fallback" />
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Specify test cases and error handling strategies.</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-testing"
+                          checked={data.testing !== null}
+                          onChange={() => toggleSection('testing')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-testing" className="text-sm font-medium text-zinc-700">Enabled</label>
+                      </div>
+                    </div>
+
+                    {data.testing && (
+                      <>
+                        <ListInput path={['testing', 'test_cases']} label="Test Cases" placeholder="e.g. user adds item with empty name" />
+                        <ListInput path={['testing', 'error_handling']} label="Error Handling" placeholder="e.g. API timeout fallback" />
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Contracts Section */}
+          <div className="space-y-2">
+            <SectionHeader id="contracts" title="Contracts" icon={FileJson} />
+            <AnimatePresence>
+              {activeSection === 'contracts' && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Enable TypeSpec as a set of nullable contracts.</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-contracts"
+                          checked={data.contracts !== null}
+                          onChange={() => toggleSection('contracts')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-contracts" className="text-sm font-medium text-zinc-700">Enabled</label>
+                      </div>
+                    </div>
+
+                    {data.contracts && (
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <h4 className="text-sm font-bold text-zinc-900">TypeSpec Contract</h4>
+                          <p className="text-xs text-zinc-500">Toggle specific TypeSpec functionality.</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <input 
+                            type="checkbox" 
+                            id="typespec"
+                            checked={data.contracts.typespec !== null}
+                            onChange={(e) => {
+                              setData(prev => ({
+                                ...prev,
+                                contracts: prev.contracts ? {
+                                  ...prev.contracts,
+                                  typespec: e.target.checked ? '' : null
+                                } : null
+                              }));
+                            }}
+                            className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          />
+                          <label htmlFor="typespec" className="text-sm font-medium text-zinc-700">TypeSpec Enabled</label>
+                        </div>
+                      </div>
+                    )}
+                    {data.contracts?.typespec !== null && data.contracts !== null && (
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">TypeSpec Definition</label>
+                        <textarea 
+                          value={data.contracts.typespec || ''}
+                          onChange={(e) => setData(prev => ({
+                            ...prev,
+                            contracts: prev.contracts ? {
+                              ...prev.contracts,
+                              typespec: e.target.value
+                            } : null
+                          }))}
+                          placeholder="Enter TypeSpec definition here..."
+                          rows={4}
+                          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none font-mono"
+                        />
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -542,17 +841,144 @@ export default function App() {
                   className="overflow-hidden"
                 >
                   <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <ListInput path={['generate', 'artifacts']} label="Generated Artifacts" placeholder="e.g. React Components" />
-                    <div className="flex items-center gap-3">
-                      <input 
-                        type="checkbox" 
-                        id="explanation"
-                        checked={data.generate.explanation}
-                        onChange={(e) => setData(prev => ({ ...prev, generate: { ...prev.generate, explanation: e.target.checked }}))}
-                        className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
-                      />
-                      <label htmlFor="explanation" className="text-sm font-medium text-zinc-700">Include step-by-step explanation</label>
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Configure generated artifacts and explanations.</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-generate"
+                          checked={data.generate !== null}
+                          onChange={() => toggleSection('generate')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-generate" className="text-sm font-medium text-zinc-700">Enabled</label>
+                      </div>
                     </div>
+
+                    {data.generate && (
+                      <>
+                        <ListInput path={['generate', 'artifacts']} label="Generated Artifacts" placeholder="e.g. React Components" />
+                        <div className="flex items-center gap-3">
+                          <input 
+                            type="checkbox" 
+                            id="explanation"
+                            checked={data.generate.explanation}
+                            onChange={(e) => setData(prev => ({ ...prev, generate: prev.generate ? { ...prev.generate, explanation: e.target.checked } : null }))}
+                            className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          />
+                          <label htmlFor="explanation" className="text-sm font-medium text-zinc-700">Include step-by-step explanation</label>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* AI Instructions Section */}
+          <div className="space-y-2">
+            <SectionHeader id="ai_instructions" title="Instructions for AI" icon={Terminal} />
+            <AnimatePresence>
+              {activeSection === 'ai_instructions' && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Add specific directives and constraints for the AI.</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-ai-instructions"
+                          checked={data.instructions_for_ai !== null}
+                          onChange={() => toggleSection('instructions_for_ai')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-ai-instructions" className="text-sm font-medium text-zinc-700">Enabled</label>
+                      </div>
+                    </div>
+
+                    {data.instructions_for_ai && (
+                      <div className="space-y-6">
+                        <div className="flex gap-2">
+                          <select 
+                            value={selectedInstructionType}
+                            onChange={(e) => setSelectedInstructionType(e.target.value)}
+                            className="flex-1 bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all uppercase tracking-widest font-bold text-zinc-500"
+                          >
+                            {INSTRUCTION_TYPES.map(type => (
+                              <option key={type.id} value={type.id}>{type.label}</option>
+                            ))}
+                          </select>
+                          <button 
+                            onClick={addInstruction}
+                            className="bg-zinc-900 text-white px-4 py-2 rounded-lg hover:bg-zinc-800 transition-colors flex items-center gap-2 text-sm font-bold"
+                          >
+                            <Plus size={18} /> Add
+                          </button>
+                        </div>
+
+                        <div className="space-y-4">
+                          {Object.entries(data.instructions_for_ai).map(([key, value]) => {
+                            const label = INSTRUCTION_TYPES.find(t => t.id === key)?.label || key;
+                            
+                            if (Array.isArray(value)) {
+                              return value.map((item, idx) => (
+                                <div key={`${key}-${idx}`} className="space-y-2 group">
+                                  <div className="flex items-center justify-between">
+                                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{label}</label>
+                                    <button 
+                                      onClick={() => removeInstruction(key, idx)}
+                                      className="text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+                                  <textarea 
+                                    value={item}
+                                    onChange={(e) => updateInstructionValue(key, e.target.value, idx)}
+                                    placeholder={`Enter ${label.toLowerCase()} specifics...`}
+                                    rows={2}
+                                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
+                                  />
+                                </div>
+                              ));
+                            }
+
+                            return (
+                              <div key={key} className="space-y-2 group">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{label}</label>
+                                  <button 
+                                    onClick={() => removeInstruction(key)}
+                                    className="text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                                <textarea 
+                                  value={value as string}
+                                  onChange={(e) => updateInstructionValue(key, e.target.value)}
+                                  placeholder={`Enter ${label.toLowerCase()} specifics...`}
+                                  rows={2}
+                                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}

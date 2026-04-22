@@ -1,0 +1,117 @@
+{
+  "context": {
+    "project": "Prompt Architect",
+    "description": "A single-page application designed to help users build structured, high-fidelity JSON prompts for LLMs by defining system specifications through a modular form interface.",
+    "agent_role": "Senior Product Designer and React Architect",
+    "assume": {
+      "OS": "any",
+      "browser": "modern",
+      "framework": "React"
+    }
+  },
+  "requirements": {
+    "use": [
+      "React 19",
+      "Tailwind CSS",
+      "Lucide React",
+      "Motion (framer-motion)",
+      "TypeScript"
+    ],
+    "ensure": [
+      "Real-time synchronization between form inputs and JSON preview",
+      "Responsive layout for desktop and mobile",
+      "Collapsible and toggleable sections for granular control",
+      "Clean, modern aesthetic with zinc and orange accents"
+    ],
+    "separate": [
+      "Types and interfaces in a dedicated file",
+      "UI components from business logic",
+      "Constants and initial states"
+    ]
+  },
+  "ui_spec": {
+    "elements": [
+      {
+        "type": "header",
+        "title": "Application Header",
+        "bind_to": "app.title"
+      },
+      {
+        "type": "collapsible_section",
+        "title": "Project Context",
+        "bind_to": "data.context"
+      },
+      {
+        "type": "collapsible_section",
+        "title": "UI & Styling",
+        "bind_to": "data.ui_spec"
+      },
+      {
+        "type": "collapsible_section",
+        "title": "Data & Backend",
+        "bind_to": "data.data_spec"
+      },
+      {
+        "type": "preview_panel",
+        "title": "Live Prompt Preview",
+        "bind_to": "jsonOutput"
+      },
+      {
+        "type": "button",
+        "title": "Copy Prompt JSON",
+        "action": "handleCopy"
+      }
+    ],
+    "layout": "grid",
+    "theme": "light",
+    "responsive": true
+  },
+  "data_spec": {
+    "model": {},
+    "storage": {
+      "type": "React Local State",
+      "collections": []
+    }
+  },
+  "behavior": {
+    "state_changes": [
+      "Form input change updates the central state object",
+      "Section toggle checkbox sets the corresponding top-level key to null or default values",
+      "Copy button triggers clipboard write and temporary success state"
+    ],
+    "validation": [
+      "Framework selection 'Other' enables custom text input",
+      "List inputs require non-empty strings to add items"
+    ],
+    "edge_cases": [
+      "Handling null sections in the UI to prevent rendering errors",
+      "Empty list states showing placeholders",
+      "Mobile view collapsing the grid to a single column"
+    ]
+  },
+  "testing": {
+    "test_cases": [
+      "Verify that disabling a section removes it from the JSON preview",
+      "Ensure custom framework input correctly populates the framework field",
+      "Check that 'Copy' functionality works across different browsers"
+    ],
+    "error_handling": [
+      "Graceful fallback for missing section data using optional chaining",
+      "Visual feedback for failed actions (if any)"
+    ],
+    "performance": [
+      "Memoized JSON stringification to prevent unnecessary re-renders"
+    ]
+  },
+  "contracts": {
+    "typespec": null
+  },
+  "generate": {
+    "artifacts": [
+      "React Components",
+      "Tailwind Styles",
+      "TypeScript Types"
+    ],
+    "explanation": true
+  }
+}

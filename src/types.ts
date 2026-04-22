@@ -25,37 +25,43 @@ export interface PromptData {
       browser: string;
       framework: string;
     };
-  };
+  } | null;
   requirements: {
     use: string[];
     ensure: string[];
     separate: string[];
-  };
+  } | null;
   ui_spec: {
     elements: UIElement[];
     layout: string;
     theme: string;
     responsive: boolean;
-  };
+  } | null;
   data_spec: {
     model: DataModel;
     storage: {
       type: string;
       collections: Collection[];
     };
-  };
+  } | null;
   behavior: {
     state_changes: string[];
     validation: string[];
     edge_cases: string[];
-  };
+  } | null;
   testing: {
     test_cases: string[];
     error_handling: string[];
     performance: string[];
-  };
+  } | null;
+  contracts?: {
+    typespec: string | null;
+  } | null;
   generate: {
     artifacts: string[];
     explanation: boolean;
-  };
+  } | null;
+  instructions_for_ai?: {
+    [key: string]: string | string[];
+  } | null;
 }
