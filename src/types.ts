@@ -57,6 +57,7 @@ export interface PromptData {
   contracts?: {
     typespec: string | null;
   } | null;
+  ontology?: any | null;
   generate: {
     artifacts: string[];
     explanation: boolean;

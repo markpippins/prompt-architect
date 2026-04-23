@@ -20,7 +20,8 @@ import {
   FileJson,
   Sparkles,
   Github,
-  Terminal
+  Terminal,
+  Network
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PromptData, UIElement, Collection } from './types';
@@ -67,6 +68,7 @@ const DEFAULT_VALUES = {
   contracts: {
     typespec: null
   },
+  ontology: {},
   generate: {
     artifacts: [],
     explanation: true
@@ -80,7 +82,8 @@ const DEFAULT_VALUES = {
 
 const INITIAL_STATE: PromptData = {
   ...DEFAULT_VALUES,
-  contracts: { typespec: null }
+  contracts: { typespec: null },
+  ontology: null
 };
 
 const INSTRUCTION_TYPES = [
@@ -99,6 +102,8 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [activeSection, setActiveSection] = useState<string>('context');
   const [selectedInstructionType, setSelectedInstructionType] = useState('do_not');
+  const [ontologyText, setOntologyText] = useState('{}');
+  const [jsonError, setJsonError] = useState<string | null>(null);
 
   const jsonOutput = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
@@ -256,6 +261,17 @@ export default function App() {
       
       return { ...prev, instructions_for_ai: next };
     });
+  };
+
+  const updateOntology = (text: string) => {
+    setOntologyText(text);
+    try {
+      const parsed = JSON.parse(text);
+      setJsonError(null);
+      setData(prev => ({ ...prev, ontology: parsed }));
+    } catch (e: any) {
+      setJsonError(e.message);
+    }
   };
 
   const SectionHeader = ({ id, title, icon: Icon }: { id: string, title: string, icon: any }) => (
@@ -821,6 +837,63 @@ export default function App() {
                           rows={4}
                           className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none font-mono"
                         />
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* Ontology Section */}
+          <div className="space-y-2">
+            <SectionHeader id="ontology" title="Ontology" icon={Network} />
+            <AnimatePresence>
+              {activeSection === 'ontology' && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
+                        <p className="text-xs text-zinc-500">Provide granular system ontology and extra instructions in JSON format.</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input 
+                          type="checkbox" 
+                          id="toggle-ontology"
+                          checked={data.ontology !== null}
+                          onChange={() => toggleSection('ontology')}
+                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                        />
+                        <label htmlFor="toggle-ontology" className="text-sm font-medium text-zinc-700">Enabled</label>
+                      </div>
+                    </div>
+
+                    {data.ontology !== null && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Ontology Definition (JSON)</label>
+                          {jsonError && (
+                            <span className="text-[10px] font-bold text-red-500 uppercase">Invalid JSON</span>
+                          )}
+                        </div>
+                        <textarea 
+                          value={ontologyText}
+                          onChange={(e) => updateOntology(e.target.value)}
+                          placeholder='{ "entities": { ... }, "relationships": [ ... ] }'
+                          rows={10}
+                          className={`w-full bg-zinc-50 border ${jsonError ? 'border-red-200 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-200 focus:ring-orange-500/20 focus:border-orange-500'} rounded-lg px-4 py-3 text-sm focus:outline-none transition-all resize-none font-mono`}
+                        />
+                        {jsonError && (
+                          <p className="text-[10px] text-red-400 font-medium leading-tight">
+                            {jsonError}
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
