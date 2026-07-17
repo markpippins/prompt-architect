@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Plus, 
   Trash2, 
@@ -21,7 +21,10 @@ import {
   Sparkles,
   Github,
   Terminal,
-  Network
+  Network,
+  Sun,
+  Moon,
+  Crosshair
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PromptData, UIElement, Collection } from './types';
@@ -86,6 +89,10 @@ const INITIAL_STATE: PromptData = {
   ontology: null
 };
 
+type Theme = 'steel' | 'light' | 'dark';
+const THEME_CYCLE: Theme[] = ['steel', 'light', 'dark'];
+const EVENT_BUS_URL = 'http://localhost:3200';
+
 const INSTRUCTION_TYPES = [
   { id: 'response_format', label: 'Response Format' },
   { id: 'do_not', label: 'Do Not' },
@@ -104,8 +111,57 @@ export default function App() {
   const [selectedInstructionType, setSelectedInstructionType] = useState('do_not');
   const [ontologyText, setOntologyText] = useState('{}');
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<Theme>('steel');
+  const [busConnected, setBusConnected] = useState(false);
 
   const jsonOutput = useMemo(() => JSON.stringify(data, null, 2), [data]);
+
+  const toggleTheme = useCallback(() => {
+    const idx = THEME_CYCLE.indexOf(theme);
+    const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+    setTheme(next);
+    // Publish to event bus so parent apps sync
+    fetch(`${EVENT_BUS_URL}/api/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sender: 'view-architect',
+        eventName: 'theme-change',
+        eventValue: `theme-${next}`
+      })
+    }).catch(() => {});
+  }, [theme]);
+
+  // Sync theme class to <html> element
+  useEffect(() => {
+    const el = document.documentElement;
+    el.classList.remove('steel', 'light', 'dark');
+    el.classList.add(theme);
+  }, [theme]);
+
+  // Connect to event bus for theme sync
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      const url = `${EVENT_BUS_URL}/api/events/stream?sender=${encodeURIComponent('view-architect')}`;
+      es = new EventSource(url);
+      es.onopen = () => setBusConnected(true);
+      es.onmessage = (msg) => {
+        try {
+          const event = JSON.parse(msg.data);
+          if (event.sender === '_system' || event.sender === 'view-architect') return;
+          if (event.eventName === 'theme-change' && typeof event.eventValue === 'string') {
+            const val = event.eventValue;
+            if (val === 'theme-steel') setTheme('steel');
+            else if (val === 'theme-light') setTheme('light');
+            else if (val === 'theme-dark') setTheme('dark');
+          }
+        } catch { /* ignore parse errors */ }
+      };
+      es.onerror = () => setBusConnected(false);
+    } catch { setBusConnected(false); }
+    return () => { es?.close(); };
+  }, []);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(jsonOutput);
@@ -279,13 +335,17 @@ export default function App() {
       onClick={() => setActiveSection(activeSection === id ? '' : id)}
       className={`w-full flex items-center justify-between p-4 rounded-xl transition-all duration-200 ${
         activeSection === id 
-          ? 'bg-zinc-900 text-white shadow-lg' 
-          : 'bg-white text-zinc-600 hover:bg-zinc-50 border border-zinc-200'
+          ? 'shadow-lg' 
+          : 'hover:opacity-80'
       }`}
+      style={{
+        background: activeSection === id ? 'var(--va-surface)' : 'var(--va-surface)',
+        color: activeSection === id ? 'var(--va-text)' : 'var(--va-text-muted)',
+        border: activeSection === id ? '1px solid var(--va-accent)' : '1px solid var(--va-border)'
+      }}
     >
-      <div className="flex items-center gap-3">
-        <Icon size={20} className={activeSection === id ? 'text-orange-400' : 'text-zinc-400'} />
-        <span className="font-semibold tracking-tight">{title}</span>
+      <div className="flex items-center gap-3">        <Icon size={20} style={{ color: activeSection === id ? 'var(--va-accent)' : 'var(--va-text-dim)' }} />
+            <span className="font-semibold tracking-tight" style={{ fontFamily: 'var(--va-font-heading)' }}>{title}</span>
       </div>
       {activeSection === id ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
     </button>
@@ -299,7 +359,7 @@ export default function App() {
 
     return (
       <div className="space-y-3">
-        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">{label}</label>
+        <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>{label}</label>
         <div className="flex gap-2">
           <input 
             type="text" 
@@ -307,11 +367,13 @@ export default function App() {
             onChange={(e) => setVal(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && (addToList(path, val), setVal(''))}
             placeholder={placeholder}
-            className="flex-1 bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+            className="flex-1 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 transition-all"
+            style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
           />
           <button 
             onClick={() => { addToList(path, val); setVal(''); }}
-            className="bg-zinc-900 text-white p-2 rounded-lg hover:bg-zinc-800 transition-colors"
+            className="p-2 rounded-lg transition-colors"
+            style={{ background: 'var(--va-accent)', color: 'white' }}
           >
             <Plus size={20} />
           </button>
@@ -324,12 +386,13 @@ export default function App() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
                 key={i} 
-                className="flex items-center gap-2 bg-white border border-zinc-200 px-3 py-1.5 rounded-full text-xs font-medium text-zinc-700 shadow-sm group"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium shadow-sm group"
+                style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text-secondary)' }}
               >
                 {item}
                 <button 
                   onClick={() => removeFromList(path, i)}
-                  className="text-zinc-400 hover:text-red-500 transition-colors"
+                  className="transition-colors" style={{ color: 'var(--va-text-dim)' }}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -342,26 +405,46 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-zinc-900 font-sans selection:bg-orange-100 selection:text-orange-900">
+    <div className="min-h-screen" style={{ background: 'var(--va-bg)', color: 'var(--va-text)' }}>
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-bottom border-zinc-200 px-6 py-4">
+      <header className="sticky top-0 z-50 backdrop-blur-md px-6 py-4" style={{ background: 'color-mix(in srgb, var(--va-surface) 80%, transparent)', borderBottom: '1px solid var(--va-border)' }}>
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-zinc-900 p-2 rounded-xl">
+            <div style={{ background: 'var(--va-surface)', color: 'var(--va-text)', border: `1px solid var(--va-border)` }} className="p-2 rounded-xl">
               <Sparkles className="text-orange-400" size={24} />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight">Prompt Architect</h1>
-              <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">v1.0 • System Design Generator</p>
+              <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: 'var(--va-font-heading)' }}>View Architect</h1>
+              <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>v1.0 • System Design Generator</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <a href="https://github.com" className="text-zinc-400 hover:text-zinc-900 transition-colors">
+            {/* Theme Toggle */}
+            <button
+              onClick={toggleTheme}
+              className="flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200 active:scale-90"
+              style={{
+                background: 'var(--va-surface)',
+                color: 'var(--va-text-muted)',
+                border: '1px solid var(--va-border-light)'
+              }}
+              title={`Theme: ${theme}${busConnected ? ' • Synced' : ''}`}
+            >
+              {theme === 'light' ? <Sun size={18} /> :
+               theme === 'dark' ? <Moon size={18} /> :
+               <Crosshair size={18} />}
+            </button>
+            <a href="https://github.com" className="transition-colors" style={{ color: 'var(--va-text-dim)' }}>
               <Github size={20} />
             </a>
             <button 
               onClick={handleCopy}
-              className="flex items-center gap-2 bg-zinc-900 text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-zinc-800 transition-all active:scale-95 shadow-lg shadow-zinc-200"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all active:scale-95"
+              style={{
+                background: 'var(--va-surface)',
+                color: 'var(--va-text)',
+                border: '1px solid var(--va-border)'
+              }}
             >
               {copied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
               {copied ? 'Copied!' : 'Copy Prompt JSON'}
@@ -385,11 +468,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Include project context in the generated prompt.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Include project context in the generated prompt.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -397,51 +480,69 @@ export default function App() {
                           id="toggle-context"
                           checked={data.context !== null}
                           onChange={() => toggleSection('context')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-context" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-context" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
                     {data.context && (
                       <>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Project Name</label>
+                          <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Project Name</label>
                           <input 
                             type="text" 
                             value={data.context.project}
                             onChange={(e) => updateContext('project', e.target.value)}
                             placeholder="e.g. Real-time Dashboard"
-                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-                          />
+                          className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all"
+                          style={{
+                            background: 'var(--va-bg)',
+                            border: '1px solid var(--va-border)',
+                            color: 'var(--va-text)',
+                            outlineColor: 'var(--va-accent)'
+                          }}
+                        />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Project Description</label>
+                          <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Project Description</label>
                           <textarea 
                             value={data.context.description}
                             onChange={(e) => updateContext('description', e.target.value)}
                             placeholder="Describe the project goals and core functionality..."
                             rows={3}
-                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
-                          />
+                          className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all resize-none"
+                          style={{
+                            background: 'var(--va-bg)',
+                            border: '1px solid var(--va-border)',
+                            color: 'var(--va-text)'
+                          }}
+                        />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Agent Role</label>
+                          <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Agent Role</label>
                           <textarea 
                             value={data.context.agent_role}
                             onChange={(e) => updateContext('agent_role', e.target.value)}
                             placeholder="Define the AI's persona (e.g. Senior Architect)..."
                             rows={2}
-                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
-                          />
+                          className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all resize-none"
+                          style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
+                        />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Framework</label>
+                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Framework</label>
                             <select 
                               value={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? data.context.assume.framework : 'Other'}
                               onChange={(e) => updateAssume('framework', e.target.value)}
-                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                              className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all"
+                          style={{
+                            background: 'var(--va-bg)',
+                            border: '1px solid var(--va-border)',
+                            color: 'var(--va-text)'
+                          }}
                             >
                               <option>React</option>
                               <option>Next.js</option>
@@ -452,14 +553,19 @@ export default function App() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400 opacity-0">Custom Framework</label>
+                            <label className="text-xs font-bold uppercase tracking-widest opacity-0" style={{ color: 'var(--va-text-muted)' }}>Custom Framework</label>
                             <input 
                               type="text"
                               disabled={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework)}
                               value={!['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? (data.context.assume.framework === 'Other' ? '' : data.context.assume.framework) : ''}
                               onChange={(e) => updateAssume('framework', e.target.value)}
                               placeholder={!['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? "Enter custom framework..." : "Select 'Other' to enable"}
-                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{
+                                background: 'var(--va-bg)',
+                                border: '1px solid var(--va-border)',
+                                color: 'var(--va-text)'
+                              }}
                             />
                           </div>
                         </div>
@@ -484,11 +590,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Include UI specifications and styling rules.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Include UI specifications and styling rules.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -496,9 +602,10 @@ export default function App() {
                           id="toggle-ui"
                           checked={data.ui_spec !== null}
                           onChange={() => toggleSection('ui_spec')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-ui" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-ui" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
@@ -506,11 +613,12 @@ export default function App() {
                       <>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Theme</label>
+                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Theme</label>
                             <select 
                               value={data.ui_spec.theme}
                               onChange={(e) => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, theme: e.target.value } : null }))}
-                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                              className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all"
+                          style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                             >
                               <option>Light</option>
                               <option>Dark</option>
@@ -519,11 +627,12 @@ export default function App() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Layout</label>
+                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Layout</label>
                             <select 
                               value={data.ui_spec.layout}
                               onChange={(e) => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, layout: e.target.value } : null }))}
-                              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                              className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all"
+                              style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                             >
                               <option>Vertical</option>
                               <option>Horizontal</option>
@@ -535,20 +644,20 @@ export default function App() {
                         
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">UI Elements</label>
+                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>UI Elements</label>
                             <button 
                               onClick={addUIElement}
-                              className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
+                              className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--va-accent)' }}
                             >
                               <Plus size={14} /> Add Element
                             </button>
                           </div>
                           <div className="space-y-3">
                             {data.ui_spec.elements.map((el, i) => (
-                              <div key={i} className="bg-zinc-50 border border-zinc-200 rounded-lg p-4 space-y-3 relative group">
+                              <div key={i} className="rounded-lg p-4 space-y-3 relative group" style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)' }}>
                                 <button 
                                   onClick={() => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, elements: prev.ui_spec.elements.filter((_, idx) => idx !== i) } : null }))}
-                                  className="absolute top-4 right-4 text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: 'var(--va-text-dim)' }}
                                 >
                                   <Trash2 size={16} />
                                 </button>
@@ -558,22 +667,24 @@ export default function App() {
                                     value={el.type}
                                     onChange={(e) => updateUIElement(i, 'type', e.target.value)}
                                     placeholder="Type (e.g. dialog)"
-                                    className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                    className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                    style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                   />
                                   <input 
                                     type="text" 
                                     value={el.title || ''}
                                     onChange={(e) => updateUIElement(i, 'title', e.target.value)}
                                     placeholder="Title/Label"
-                                    className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                    className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                    style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                   />
-                                </div>
-                                <input 
-                                  type="text" 
-                                  value={el.bind_to || ''}
-                                  onChange={(e) => updateUIElement(i, 'bind_to', e.target.value)}
-                                  placeholder="Data Binding (e.g. data.items)"
-                                  className="w-full bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                </div>                                  <input 
+                                    type="text" 
+                                    value={el.bind_to || ''}
+                                    onChange={(e) => updateUIElement(i, 'bind_to', e.target.value)}
+                                    placeholder="Data Binding (e.g. data.items)"
+                                    className="w-full rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                    style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                 />
                               </div>
                             ))}
@@ -598,11 +709,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Define storage type and data collections.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Define storage type and data collections.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -610,40 +721,42 @@ export default function App() {
                           id="toggle-data"
                           checked={data.data_spec !== null}
                           onChange={() => toggleSection('data_spec')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-data" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-data" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
                     {data.data_spec && (
                       <>
-                        <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Storage Type</label>
+                        <div className="space-y-2">                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Storage Type</label>
                           <input 
                             type="text" 
                             value={data.data_spec.storage.type}
                             onChange={(e) => setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, type: e.target.value }} : null }))}
                             placeholder="e.g. Convex"
-                            className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                            className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all"
+                            style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                           />
                         </div>
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Collections / Tables</label>
+                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Collections / Tables</label>
                             <button 
                               onClick={() => setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: [...prev.data_spec.storage.collections, { name: '', schema: '' }] }} : null }))}
-                              className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1"
+                              className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--va-accent)' }}
                             >
                               <Plus size={14} /> Add Collection
                             </button>
                           </div>
                           <div className="space-y-3">
                             {data.data_spec.storage.collections.map((col, i) => (
-                              <div key={i} className="bg-zinc-50 border border-zinc-200 rounded-lg p-4 grid grid-cols-2 gap-3 relative group">
+                              <div key={i} className="rounded-lg p-4 grid grid-cols-2 gap-3 relative group" style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)' }}>
                                 <button 
                                   onClick={() => setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: prev.data_spec.storage.collections.filter((_, idx) => idx !== i) }} : null }))}
-                                  className="absolute -top-2 -right-2 bg-white border border-zinc-200 rounded-full p-1 text-zinc-400 hover:text-red-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                  className="absolute -top-2 -right-2 rounded-full p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                  style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text-dim)' }}
                                 >
                                   <Trash2 size={12} />
                                 </button>
@@ -657,7 +770,8 @@ export default function App() {
                                     setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }} : null }));
                                   }}
                                   placeholder="Name"
-                                  className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                  className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                  style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                 />
                                 <input 
                                   type="text" 
@@ -669,7 +783,8 @@ export default function App() {
                                     setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }} : null }));
                                   }}
                                   placeholder="Schema (e.g. JSON)"
-                                  className="bg-white border border-zinc-200 rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                                  className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                  style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                 />
                               </div>
                             ))}
@@ -694,11 +809,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Define application behavior and logic rules.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Define application behavior and logic rules.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -706,9 +821,10 @@ export default function App() {
                           id="toggle-behavior"
                           checked={data.behavior !== null}
                           onChange={() => toggleSection('behavior')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-behavior" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-behavior" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
@@ -736,11 +852,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Specify test cases and error handling strategies.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Specify test cases and error handling strategies.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -748,9 +864,10 @@ export default function App() {
                           id="toggle-testing"
                           checked={data.testing !== null}
                           onChange={() => toggleSection('testing')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-testing" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-testing" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
@@ -777,11 +894,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Enable TypeSpec as a set of nullable contracts.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Enable TypeSpec as a set of nullable contracts.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -789,17 +906,17 @@ export default function App() {
                           id="toggle-contracts"
                           checked={data.contracts !== null}
                           onChange={() => toggleSection('contracts')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-contracts" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-contracts" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
                     {data.contracts && (
                       <div className="flex items-center justify-between">
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-bold text-zinc-900">TypeSpec Contract</h4>
-                          <p className="text-xs text-zinc-500">Toggle specific TypeSpec functionality.</p>
+                        <div className="space-y-1">                            <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>TypeSpec Contract</h4>
+                          <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Toggle specific TypeSpec functionality.</p>
                         </div>
                         <div className="flex items-center gap-3">
                           <input 
@@ -815,15 +932,15 @@ export default function App() {
                                 } : null
                               }));
                             }}
-                            className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                            className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                           />
-                          <label htmlFor="typespec" className="text-sm font-medium text-zinc-700">TypeSpec Enabled</label>
+                          <label htmlFor="typespec" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>TypeSpec Enabled</label>
                         </div>
                       </div>
                     )}
                     {data.contracts?.typespec !== null && data.contracts !== null && (
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">TypeSpec Definition</label>
+                      <div className="space-y-2">                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>TypeSpec Definition</label>
                         <textarea 
                           value={data.contracts.typespec || ''}
                           onChange={(e) => setData(prev => ({
@@ -835,7 +952,8 @@ export default function App() {
                           }))}
                           placeholder="Enter TypeSpec definition here..."
                           rows={4}
-                          className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none font-mono"
+                          className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all resize-none font-mono"
+                          style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                         />
                       </div>
                     )}
@@ -856,11 +974,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Provide granular system ontology and extra instructions in JSON format.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Provide granular system ontology and extra instructions in JSON format.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -868,16 +986,16 @@ export default function App() {
                           id="toggle-ontology"
                           checked={data.ontology !== null}
                           onChange={() => toggleSection('ontology')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-ontology" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-ontology" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
                     {data.ontology !== null && (
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold uppercase tracking-widest text-zinc-400">Ontology Definition (JSON)</label>
+                        <div className="flex items-center justify-between">                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Ontology Definition (JSON)</label>
                           {jsonError && (
                             <span className="text-[10px] font-bold text-red-500 uppercase">Invalid JSON</span>
                           )}
@@ -887,7 +1005,12 @@ export default function App() {
                           onChange={(e) => updateOntology(e.target.value)}
                           placeholder='{ "entities": { ... }, "relationships": [ ... ] }'
                           rows={10}
-                          className={`w-full bg-zinc-50 border ${jsonError ? 'border-red-200 focus:ring-red-500/20 focus:border-red-500' : 'border-zinc-200 focus:ring-orange-500/20 focus:border-orange-500'} rounded-lg px-4 py-3 text-sm focus:outline-none transition-all resize-none font-mono`}
+                          className={`w-full rounded-lg px-4 py-3 text-sm focus:outline-none transition-all resize-none font-mono`}
+                          style={{
+                            background: 'var(--va-bg)',
+                            border: `1px solid ${jsonError ? 'var(--va-red)' : 'var(--va-border)'}`,
+                            color: 'var(--va-text)'
+                          }}
                         />
                         {jsonError && (
                           <p className="text-[10px] text-red-400 font-medium leading-tight">
@@ -913,11 +1036,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Configure generated artifacts and explanations.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Configure generated artifacts and explanations.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -925,9 +1048,10 @@ export default function App() {
                           id="toggle-generate"
                           checked={data.generate !== null}
                           onChange={() => toggleSection('generate')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-generate" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-generate" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
@@ -940,9 +1064,9 @@ export default function App() {
                             id="explanation"
                             checked={data.generate.explanation}
                             onChange={(e) => setData(prev => ({ ...prev, generate: prev.generate ? { ...prev.generate, explanation: e.target.checked } : null }))}
-                            className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                            className="w-4 h-4 rounded focus:ring-2" style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                           />
-                          <label htmlFor="explanation" className="text-sm font-medium text-zinc-700">Include step-by-step explanation</label>
+                          <label htmlFor="explanation" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Include step-by-step explanation</label>
                         </div>
                       </>
                     )}
@@ -963,11 +1087,11 @@ export default function App() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="bg-white border border-zinc-200 rounded-xl p-6 space-y-6 shadow-sm">
-                    <div className="flex items-center justify-between border-b border-zinc-100 pb-4 mb-4">
+                  <div className="rounded-xl p-6 space-y-6 shadow-sm" style={{ background: 'var(--va-surface-2)', border: '1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
-                        <h4 className="text-sm font-bold text-zinc-900">Enable Section</h4>
-                        <p className="text-xs text-zinc-500">Add specific directives and constraints for the AI.</p>
+                        <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
+                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Add specific directives and constraints for the AI.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -975,9 +1099,10 @@ export default function App() {
                           id="toggle-ai-instructions"
                           checked={data.instructions_for_ai !== null}
                           onChange={() => toggleSection('instructions_for_ai')}
-                          className="w-4 h-4 rounded border-zinc-300 text-orange-500 focus:ring-orange-500"
+                          className="w-4 h-4 rounded focus:ring-2"
+                          style={{ accentColor: 'var(--va-accent)', borderColor: 'var(--va-border)' }}
                         />
-                        <label htmlFor="toggle-ai-instructions" className="text-sm font-medium text-zinc-700">Enabled</label>
+                        <label htmlFor="toggle-ai-instructions" className="text-sm font-medium" style={{ color: 'var(--va-text-secondary)' }}>Enabled</label>
                       </div>
                     </div>
 
@@ -987,7 +1112,8 @@ export default function App() {
                           <select 
                             value={selectedInstructionType}
                             onChange={(e) => setSelectedInstructionType(e.target.value)}
-                            className="flex-1 bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all uppercase tracking-widest font-bold text-zinc-500"
+                            className="flex-1 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 transition-all uppercase tracking-widest font-bold"
+                            style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                           >
                             {INSTRUCTION_TYPES.map(type => (
                               <option key={type.id} value={type.id}>{type.label}</option>
@@ -995,7 +1121,7 @@ export default function App() {
                           </select>
                           <button 
                             onClick={addInstruction}
-                            className="bg-zinc-900 text-white px-4 py-2 rounded-lg hover:bg-zinc-800 transition-colors flex items-center gap-2 text-sm font-bold"
+                            className="px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-bold" style={{ background: 'var(--va-accent)', color: 'white' }}
                           >
                             <Plus size={18} /> Add
                           </button>
@@ -1009,10 +1135,10 @@ export default function App() {
                               return value.map((item, idx) => (
                                 <div key={`${key}-${idx}`} className="space-y-2 group">
                                   <div className="flex items-center justify-between">
-                                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{label}</label>
+                                    <label                                    className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: 'var(--va-text-muted)' }}>{label}</label>
                                     <button 
                                       onClick={() => removeInstruction(key, idx)}
-                                      className="text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                      className="opacity-0 group-hover:opacity-100 transition-all" style={{ color: 'var(--va-text-dim)' }}
                                     >
                                       <Trash2 size={12} />
                                     </button>
@@ -1022,7 +1148,8 @@ export default function App() {
                                     onChange={(e) => updateInstructionValue(key, e.target.value, idx)}
                                     placeholder={`Enter ${label.toLowerCase()} specifics...`}
                                     rows={2}
-                                    className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
+                                    className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all resize-none"
+                                    style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                   />
                                 </div>
                               ));
@@ -1030,11 +1157,10 @@ export default function App() {
 
                             return (
                               <div key={key} className="space-y-2 group">
-                                <div className="flex items-center justify-between">
-                                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">{label}</label>
-                                  <button 
-                                    onClick={() => removeInstruction(key)}
-                                    className="text-zinc-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                <div className="flex items-center justify-between">                                    <label className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: 'var(--va-text-muted)' }}>{label}</label>
+                                    <button 
+                                      onClick={() => removeInstruction(key)}
+                                      className="opacity-0 group-hover:opacity-100 transition-all" style={{ color: 'var(--va-text-dim)' }}
                                   >
                                     <Trash2 size={12} />
                                   </button>
@@ -1044,7 +1170,8 @@ export default function App() {
                                   onChange={(e) => updateInstructionValue(key, e.target.value)}
                                   placeholder={`Enter ${label.toLowerCase()} specifics...`}
                                   rows={2}
-                                  className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all resize-none"
+                                  className="w-full rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 transition-all resize-none"
+                                  style={{ background: 'var(--va-bg)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                 />
                               </div>
                             );
@@ -1064,27 +1191,27 @@ export default function App() {
         <div className="lg:col-span-5">
           <div className="sticky top-24 space-y-4">
             <div className="flex items-center justify-between px-2">
-              <h2 className="text-sm font-bold uppercase tracking-widest text-zinc-400">Live Prompt Preview</h2>
+              <h2 className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Live Prompt Preview</h2>
               <div className="flex gap-2">
                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Real-time Sync</span>
+                <span className="text-[10px] font-bold uppercase tracking-tighter" style={{ color: 'var(--va-text-muted)' }}>Real-time Sync</span>
               </div>
             </div>
-            <div className="bg-zinc-900 rounded-2xl p-6 shadow-2xl shadow-zinc-200 border border-zinc-800 relative overflow-hidden group">
+            <div className="rounded-2xl p-6 shadow-2xl relative overflow-hidden group" style={{ background: 'hsl(222, 47%, 8%)', border: '1px solid var(--va-border)' }}>
               {/* Code Background Glow */}
               <div className="absolute -top-24 -right-24 w-64 h-64 bg-orange-500/10 blur-[100px] pointer-events-none" />
               
               <div className="relative">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
-                    <div className="w-2.5 h-2.5 rounded-full bg-zinc-700" />
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--va-border)' }} />
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--va-border)' }} />
+                    <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--va-border)' }} />
                   </div>
-                  <span className="text-[10px] font-mono text-zinc-500 uppercase">prompt_spec.json</span>
+                  <span className="text-[10px] font-mono uppercase" style={{ color: 'var(--va-text-dim)', fontFamily: 'var(--va-font-mono)' }}>prompt_spec.json</span>
                 </div>
                 
-                <pre className="text-xs font-mono text-zinc-300 overflow-auto max-h-[600px] scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
+                <pre className="text-xs overflow-auto max-h-[600px]" style={{ color: 'var(--va-text)', fontFamily: 'var(--va-font-mono)' }}>
                   <code>{jsonOutput}</code>
                 </pre>
               </div>
@@ -1098,14 +1225,14 @@ export default function App() {
               </button>
             </div>
 
-            <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
+            <div className="rounded-xl p-4" style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border-light)' }}>
               <div className="flex gap-3">
-                <div className="bg-orange-100 p-2 rounded-lg h-fit">
-                  <Sparkles className="text-orange-600" size={16} />
+                <div className="p-2 rounded-lg h-fit" style={{ background: 'var(--va-accent)', color: 'white' }}>
+                  <Sparkles size={16} />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-orange-900">Pro Tip</h4>
-                  <p className="text-xs text-orange-800/80 leading-relaxed mt-1">
+                  <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Pro Tip</h4>
+                  <p className="text-xs leading-relaxed mt-1" style={{ color: 'var(--va-text-muted)' }}>
                     Use this JSON as a system instruction or a direct prompt for Gemini to generate high-fidelity boilerplate code.
                   </p>
                 </div>
@@ -1116,16 +1243,16 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="max-w-7xl mx-auto px-6 py-12 border-t border-zinc-200 mt-12">
+      <footer className="max-w-7xl mx-auto px-6 py-12 mt-12" style={{ borderTop: '1px solid var(--va-border)' }}>
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-2 text-zinc-400">
+          <div className="flex items-center gap-2" style={{ color: 'var(--va-text-muted)' }}>
             <Sparkles size={16} />
             <span className="text-sm font-medium">Built for AI Studio Build</span>
           </div>
           <div className="flex gap-8">
-            <a href="#" className="text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-900 transition-colors">Documentation</a>
-            <a href="#" className="text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-900 transition-colors">Templates</a>
-            <a href="#" className="text-xs font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-900 transition-colors">Privacy</a>
+            <a href="#" className="text-xs font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Documentation</a>
+            <a href="#" className="text-xs font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Templates</a>
+            <a href="#" className="text-xs font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Privacy</a>
           </div>
         </div>
       </footer>
