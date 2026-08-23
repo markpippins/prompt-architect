@@ -91,7 +91,11 @@ const INITIAL_STATE: PromptData = {
 
 type Theme = 'steel' | 'light' | 'dark';
 const THEME_CYCLE: Theme[] = ['steel', 'light', 'dark'];
-const EVENT_BUS_URL = 'http://localhost:3200';
+// Environment-controlled event bus: the live unit points at the nexus event
+// bus (:3200). Set VITE_VA_EVENT_BUS_URL to override; mock mode (VITE_VA_MODE
+// = mock) disables live publishing/streaming entirely.
+const EVENT_BUS_URL = (import.meta as any).env?.VITE_VA_EVENT_BUS_URL || 'http://localhost:3200';
+const VA_MODE: 'live' | 'mock' = (import.meta as any).env?.VITE_VA_MODE === 'mock' ? 'mock' : 'live';
 
 const INSTRUCTION_TYPES = [
   { id: 'response_format', label: 'Response Format' },
@@ -120,16 +124,19 @@ export default function App() {
     const idx = THEME_CYCLE.indexOf(theme);
     const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
     setTheme(next);
-    // Publish to event bus so parent apps sync
-    fetch(`${EVENT_BUS_URL}/api/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sender: 'view-architect',
-        eventName: 'theme-change',
-        eventValue: `theme-${next}`
-      })
-    }).catch(() => {});
+    // Publish to event bus so parent apps sync. In live mode failures stay
+  // visible (connection flag drops); in mock mode nothing is published.
+    if (VA_MODE === 'live') {
+      fetch(`${EVENT_BUS_URL}/api/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: 'view-architect',
+          eventName: 'theme-change',
+          eventValue: `theme-${next}`
+        })
+      }).then(() => setBusConnected(true)).catch(() => setBusConnected(false));
+    }
   }, [theme]);
 
   // Sync theme class to <html> element
@@ -139,8 +146,10 @@ export default function App() {
     el.classList.add(theme);
   }, [theme]);
 
-  // Connect to event bus for theme sync
+  // Connect to event bus for theme sync (live mode only; mock mode does not
+  // connect so the UI reports local-only operation).
   useEffect(() => {
+    if (VA_MODE !== 'live') return;
     let es: EventSource | null = null;
     try {
       const url = `${EVENT_BUS_URL}/api/events/stream?sender=${encodeURIComponent('view-architect')}`;
@@ -428,7 +437,7 @@ export default function App() {
                 color: 'var(--va-text-muted)',
                 border: '1px solid var(--va-border-light)'
               }}
-              title={`Theme: ${theme}${busConnected ? ' • Synced' : ''}`}
+              title={`Theme: ${theme}${VA_MODE === 'mock' ? ' • Mock (no live bus)' : busConnected ? ' • Synced' : ' • Event bus DOWN'}`}
             >
               {theme === 'light' ? <Sun size={18} /> :
                theme === 'dark' ? <Moon size={18} /> :
