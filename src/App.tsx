@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PromptData, UIElement, Collection } from './types';
+import { resolveLacMode, resolveTargetUrl } from './lac';
 
 const DEFAULT_VALUES = {
   context: {
@@ -91,11 +92,12 @@ const INITIAL_STATE: PromptData = {
 
 type Theme = 'steel' | 'light' | 'dark';
 const THEME_CYCLE: Theme[] = ['steel', 'light', 'dark'];
-// Environment-controlled event bus: the live unit points at the nexus event
-// bus (:3200). Set VITE_VA_EVENT_BUS_URL to override; mock mode (VITE_VA_MODE
-// = mock) disables live publishing/streaming entirely.
-const EVENT_BUS_URL = (import.meta as any).env?.VITE_VA_EVENT_BUS_URL || 'http://localhost:3200';
-const VA_MODE: 'live' | 'mock' = (import.meta as any).env?.VITE_VA_MODE === 'mock' ? 'mock' : 'live';
+// LAC (thread 83d2fd5c): environment-controlled event bus — the live unit
+// points at the nexus event bus (:3200 documented default). Mock is an
+// explicit opt-in (VITE_VA_MODE=mock); default is live.
+const LAC_ENV = (import.meta as any).env as Record<string, unknown> | undefined;
+const EVENT_BUS_URL = resolveTargetUrl(LAC_ENV, 'VITE_VA_EVENT_BUS_URL', 'http://localhost:3200');
+const VA_MODE: 'live' | 'mock' = resolveLacMode(LAC_ENV, 'VITE_VA_MODE');
 
 const INSTRUCTION_TYPES = [
   { id: 'response_format', label: 'Response Format' },
