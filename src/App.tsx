@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PromptData, UIElement, Collection } from './types';
+import { resolveLacMode, resolveTargetUrl } from './lac';
 
 const DEFAULT_VALUES = {
   context: {
@@ -91,7 +92,12 @@ const INITIAL_STATE: PromptData = {
 
 type Theme = 'steel' | 'light' | 'dark';
 const THEME_CYCLE: Theme[] = ['steel', 'light', 'dark'];
-const EVENT_BUS_URL = 'http://localhost:3200';
+// LAC (thread 83d2fd5c): environment-controlled event bus — the live unit
+// points at the nexus event bus (:3200 documented default). Mock is an
+// explicit opt-in (VITE_VA_MODE=mock); default is live.
+const LAC_ENV = (import.meta as any).env as Record<string, unknown> | undefined;
+const EVENT_BUS_URL = resolveTargetUrl(LAC_ENV, 'VITE_VA_EVENT_BUS_URL', 'http://localhost:3200');
+const VA_MODE: 'live' | 'mock' = resolveLacMode(LAC_ENV, 'VITE_VA_MODE');
 
 const INSTRUCTION_TYPES = [
   { id: 'response_format', label: 'Response Format' },
@@ -120,16 +126,19 @@ export default function App() {
     const idx = THEME_CYCLE.indexOf(theme);
     const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
     setTheme(next);
-    // Publish to event bus so parent apps sync
-    fetch(`${EVENT_BUS_URL}/api/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sender: 'view-architect',
-        eventName: 'theme-change',
-        eventValue: `theme-${next}`
-      })
-    }).catch(() => {});
+    // Publish to event bus so parent apps sync. In live mode failures stay
+  // visible (connection flag drops); in mock mode nothing is published.
+    if (VA_MODE === 'live') {
+      fetch(`${EVENT_BUS_URL}/api/events`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sender: 'view-architect',
+          eventName: 'theme-change',
+          eventValue: `theme-${next}`
+        })
+      }).then(() => setBusConnected(true)).catch(() => setBusConnected(false));
+    }
   }, [theme]);
 
   // Sync theme class to <html> element
@@ -139,8 +148,10 @@ export default function App() {
     el.classList.add(theme);
   }, [theme]);
 
-  // Connect to event bus for theme sync
+  // Connect to event bus for theme sync (live mode only; mock mode does not
+  // connect so the UI reports local-only operation).
   useEffect(() => {
+    if (VA_MODE !== 'live') return;
     let es: EventSource | null = null;
     try {
       const url = `${EVENT_BUS_URL}/api/events/stream?sender=${encodeURIComponent('view-architect')}`;
@@ -359,7 +370,7 @@ export default function App() {
 
     return (
       <div className="space-y-3">
-        <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>{label}</label>
+        <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>{label}</label>
         <div className="flex gap-2">
           <input 
             type="text" 
@@ -386,7 +397,7 @@ export default function App() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
                 key={i} 
-                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium shadow-sm group"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm group"
                 style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text-secondary)' }}
               >
                 {item}
@@ -415,7 +426,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight" style={{ fontFamily: 'var(--va-font-heading)' }}>View Architect</h1>
-              <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>v1.0 • System Design Generator</p>
+              <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>v1.0 • System Design Generator</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -428,7 +439,7 @@ export default function App() {
                 color: 'var(--va-text-muted)',
                 border: '1px solid var(--va-border-light)'
               }}
-              title={`Theme: ${theme}${busConnected ? ' • Synced' : ''}`}
+              title={`Theme: ${theme}${VA_MODE === 'mock' ? ' • Mock (no live bus)' : busConnected ? ' • Synced' : ' • Event bus DOWN'}`}
             >
               {theme === 'light' ? <Sun size={18} /> :
                theme === 'dark' ? <Moon size={18} /> :
@@ -472,7 +483,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Include project context in the generated prompt.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Include project context in the generated prompt.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -490,7 +501,7 @@ export default function App() {
                     {data.context && (
                       <>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Project Name</label>
+                          <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Project Name</label>
                           <input 
                             type="text" 
                             value={data.context.project}
@@ -506,7 +517,7 @@ export default function App() {
                         />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Project Description</label>
+                          <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Project Description</label>
                           <textarea 
                             value={data.context.description}
                             onChange={(e) => updateContext('description', e.target.value)}
@@ -521,7 +532,7 @@ export default function App() {
                         />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Agent Role</label>
+                          <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Agent Role</label>
                           <textarea 
                             value={data.context.agent_role}
                             onChange={(e) => updateContext('agent_role', e.target.value)}
@@ -533,7 +544,7 @@ export default function App() {
                         </div>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Framework</label>
+                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Framework</label>
                             <select 
                               value={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework) ? data.context.assume.framework : 'Other'}
                               onChange={(e) => updateAssume('framework', e.target.value)}
@@ -553,7 +564,7 @@ export default function App() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest opacity-0" style={{ color: 'var(--va-text-muted)' }}>Custom Framework</label>
+                            <label className="text-sm font-bold uppercase tracking-widest opacity-0" style={{ color: 'var(--va-text-muted)' }}>Custom Framework</label>
                             <input 
                               type="text"
                               disabled={['React', 'Next.js', 'Vue', 'Angular', 'Svelte'].includes(data.context.assume.framework)}
@@ -594,7 +605,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Include UI specifications and styling rules.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Include UI specifications and styling rules.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -613,7 +624,7 @@ export default function App() {
                       <>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Theme</label>
+                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Theme</label>
                             <select 
                               value={data.ui_spec.theme}
                               onChange={(e) => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, theme: e.target.value } : null }))}
@@ -627,7 +638,7 @@ export default function App() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Layout</label>
+                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Layout</label>
                             <select 
                               value={data.ui_spec.layout}
                               onChange={(e) => setData(prev => ({ ...prev, ui_spec: prev.ui_spec ? { ...prev.ui_spec, layout: e.target.value } : null }))}
@@ -644,10 +655,10 @@ export default function App() {
                         
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>UI Elements</label>
+                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>UI Elements</label>
                             <button 
                               onClick={addUIElement}
-                              className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--va-accent)' }}
+                              className="text-sm font-bold flex items-center gap-1" style={{ color: 'var(--va-accent)' }}
                             >
                               <Plus size={14} /> Add Element
                             </button>
@@ -667,7 +678,7 @@ export default function App() {
                                     value={el.type}
                                     onChange={(e) => updateUIElement(i, 'type', e.target.value)}
                                     placeholder="Type (e.g. dialog)"
-                                    className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                    className="rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1"
                                     style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                   />
                                   <input 
@@ -675,7 +686,7 @@ export default function App() {
                                     value={el.title || ''}
                                     onChange={(e) => updateUIElement(i, 'title', e.target.value)}
                                     placeholder="Title/Label"
-                                    className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                    className="rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1"
                                     style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                   />
                                 </div>                                  <input 
@@ -683,7 +694,7 @@ export default function App() {
                                     value={el.bind_to || ''}
                                     onChange={(e) => updateUIElement(i, 'bind_to', e.target.value)}
                                     placeholder="Data Binding (e.g. data.items)"
-                                    className="w-full rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                    className="w-full rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1"
                                     style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                 />
                               </div>
@@ -713,7 +724,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Define storage type and data collections.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Define storage type and data collections.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -730,7 +741,7 @@ export default function App() {
 
                     {data.data_spec && (
                       <>
-                        <div className="space-y-2">                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Storage Type</label>
+                        <div className="space-y-2">                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Storage Type</label>
                           <input 
                             type="text" 
                             value={data.data_spec.storage.type}
@@ -742,10 +753,10 @@ export default function App() {
                         </div>
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Collections / Tables</label>
+                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Collections / Tables</label>
                             <button 
                               onClick={() => setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: [...prev.data_spec.storage.collections, { name: '', schema: '' }] }} : null }))}
-                              className="text-xs font-bold flex items-center gap-1" style={{ color: 'var(--va-accent)' }}
+                              className="text-sm font-bold flex items-center gap-1" style={{ color: 'var(--va-accent)' }}
                             >
                               <Plus size={14} /> Add Collection
                             </button>
@@ -770,7 +781,7 @@ export default function App() {
                                     setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }} : null }));
                                   }}
                                   placeholder="Name"
-                                  className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                  className="rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1"
                                   style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                 />
                                 <input 
@@ -783,7 +794,7 @@ export default function App() {
                                     setData(prev => ({ ...prev, data_spec: prev.data_spec ? { ...prev.data_spec, storage: { ...prev.data_spec.storage, collections: newCols }} : null }));
                                   }}
                                   placeholder="Schema (e.g. JSON)"
-                                  className="rounded-md px-3 py-1.5 text-xs focus:outline-none focus:ring-1"
+                                  className="rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1"
                                   style={{ background: 'var(--va-surface)', border: '1px solid var(--va-border)', color: 'var(--va-text)' }}
                                 />
                               </div>
@@ -813,7 +824,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Define application behavior and logic rules.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Define application behavior and logic rules.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -856,7 +867,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Specify test cases and error handling strategies.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Specify test cases and error handling strategies.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -898,7 +909,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Enable TypeSpec as a set of nullable contracts.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Enable TypeSpec as a set of nullable contracts.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -916,7 +927,7 @@ export default function App() {
                     {data.contracts && (
                       <div className="flex items-center justify-between">
                         <div className="space-y-1">                            <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>TypeSpec Contract</h4>
-                          <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Toggle specific TypeSpec functionality.</p>
+                          <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Toggle specific TypeSpec functionality.</p>
                         </div>
                         <div className="flex items-center gap-3">
                           <input 
@@ -940,7 +951,7 @@ export default function App() {
                       </div>
                     )}
                     {data.contracts?.typespec !== null && data.contracts !== null && (
-                      <div className="space-y-2">                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>TypeSpec Definition</label>
+                      <div className="space-y-2">                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>TypeSpec Definition</label>
                         <textarea 
                           value={data.contracts.typespec || ''}
                           onChange={(e) => setData(prev => ({
@@ -978,7 +989,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Provide granular system ontology and extra instructions in JSON format.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Provide granular system ontology and extra instructions in JSON format.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -995,7 +1006,7 @@ export default function App() {
 
                     {data.ontology !== null && (
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">                            <label className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Ontology Definition (JSON)</label>
+                        <div className="flex items-center justify-between">                            <label className="text-sm font-bold uppercase tracking-widest" style={{ color: 'var(--va-text-muted)' }}>Ontology Definition (JSON)</label>
                           {jsonError && (
                             <span className="text-[10px] font-bold text-red-500 uppercase">Invalid JSON</span>
                           )}
@@ -1040,7 +1051,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Configure generated artifacts and explanations.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Configure generated artifacts and explanations.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -1091,7 +1102,7 @@ export default function App() {
                     <div className="flex items-center justify-between pb-4 mb-4" style={{ borderBottom: '1px solid var(--va-border)' }}>
                       <div className="space-y-1">
                         <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Enable Section</h4>
-                        <p className="text-xs" style={{ color: 'var(--va-text-muted)' }}>Add specific directives and constraints for the AI.</p>
+                        <p className="text-sm" style={{ color: 'var(--va-text-muted)' }}>Add specific directives and constraints for the AI.</p>
                       </div>
                       <div className="flex items-center gap-3">
                         <input 
@@ -1211,7 +1222,7 @@ export default function App() {
                   <span className="text-[10px] font-mono uppercase" style={{ color: 'var(--va-text-dim)', fontFamily: 'var(--va-font-mono)' }}>prompt_spec.json</span>
                 </div>
                 
-                <pre className="text-xs overflow-auto max-h-[600px]" style={{ color: 'var(--va-text)', fontFamily: 'var(--va-font-mono)' }}>
+                <pre className="text-sm overflow-auto max-h-[600px]" style={{ color: 'var(--va-text)', fontFamily: 'var(--va-font-mono)' }}>
                   <code>{jsonOutput}</code>
                 </pre>
               </div>
@@ -1232,7 +1243,7 @@ export default function App() {
                 </div>
                 <div>
                   <h4 className="text-sm font-bold" style={{ color: 'var(--va-text)' }}>Pro Tip</h4>
-                  <p className="text-xs leading-relaxed mt-1" style={{ color: 'var(--va-text-muted)' }}>
+                  <p className="text-sm leading-relaxed mt-1" style={{ color: 'var(--va-text-muted)' }}>
                     Use this JSON as a system instruction or a direct prompt for Gemini to generate high-fidelity boilerplate code.
                   </p>
                 </div>
@@ -1250,9 +1261,9 @@ export default function App() {
             <span className="text-sm font-medium">Built for AI Studio Build</span>
           </div>
           <div className="flex gap-8">
-            <a href="#" className="text-xs font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Documentation</a>
-            <a href="#" className="text-xs font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Templates</a>
-            <a href="#" className="text-xs font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Privacy</a>
+            <a href="#" className="text-sm font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Documentation</a>
+            <a href="#" className="text-sm font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Templates</a>
+            <a href="#" className="text-sm font-bold uppercase tracking-widest transition-colors" style={{ color: 'var(--va-text-muted)' }}>Privacy</a>
           </div>
         </div>
       </footer>
